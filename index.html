@@ -125,7 +125,7 @@ export default function EmbroideryCustomerApp() {
           totalPrice: row['ราคารวม'] || '',
           deposit: row['มัดจำ'] || '',
           paid: row['จ่ายแล้ว'] || '',
-          status: row['สถานะ'] || 'จองคิว',
+          status: row['สถานะ'] || 'กำลังทำ',
           workImages: [],
           chatImages: []
         }));
@@ -466,11 +466,9 @@ export default function EmbroideryCustomerApp() {
                   </div>
                   <div className="flex gap-2">
                     <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                      customer.status === 'จองคิว' ? 'bg-orange-100 text-orange-800' :
-                      customer.status === 'กำลังทำ' ? 'bg-yellow-100 text-yellow-800' :
                       customer.status === 'เสร็จแล้ว' ? 'bg-green-100 text-green-800' :
                       customer.status === 'ส่งแล้ว' ? 'bg-blue-100 text-blue-800' :
-                      'bg-gray-100 text-gray-800'
+                      'bg-yellow-100 text-yellow-800'
                     }`}>
                       {customer.status}
                     </span>
