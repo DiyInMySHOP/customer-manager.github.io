@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบจัดการลูกค้างานปักผ้า</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body class="bg-gradient-to-br from-pink-50 to-purple-50 min-h-screen">
+    <div id="app" class="p-4 max-w-7xl mx-auto"></div>
+
+    <script>
+        let customers = [];
+        let searchTerm = '';
+        let showForm = false;
+        let editingId = null;
+        let formData = {
+            name: '',
+            phone: '',
+            address: '',
+            workDetails: '',
+            startDate: '',
+            dueDate: '',
+            totalPrice: '',
+            deposit: '',
+            paid: '',
+            status: 'กำลังทำ',
+            workImages: [],
+            chatImages: []
+        };
+
+        function calculateRemaining(total, paid) {
+            return (parseFloat(total) || 0) - (parseFloat(paid) || 0);
+        }
+
+        function resetForm() {
+            formData = {
+                name: '',
+                phone: '',
+                address: '',
+                workDetails: '',
+                startDate: '',
+                dueDate: '',
+                totalPrice: '',
+                deposit: '',
+                paid: '',
+                status: 'กำลังทำ',
+                workImages: [],
+                chatImages: []
+            };
+            editingId = null;
+            showForm = false;
+            render();
+        }
+
+        function handleSubmit(e) {
+            e.preventDefault();
+            
+            if (editingId !== null) {
+                customers = customers.map(c => 
+                    c.id === editingId ? { ...formData, id: editingId } : c
+                );
+            } else {
+                customers.push({ ...formData, id: Date.now() });
+            }
+            
+            resetForm();
+        }
+
+        function handleEdit(customer) {
+            formData = { ...customer };
+            editingId = customer.id;
+            showForm = true;
+            render();
+        }
+
+        function handleDelete(id) {
+            if (confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?')) {
+                customers = customers.filter(c => c.id !== id);
+                render();
+            }
+        }
+
+        function handleImageUpload(e, type) {
+            const files = Array.from(e.target.files);
+            files.forEach(file => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    formData[type].push(reader.result);
+                    render();
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function removeImage(type, index) {
+            formData[type] = formData[type].filter((_, i) => i !== index);
+            render();
+        }
+
+        function handleImportExcel(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                try {
+                    const data = evt.target.result;
+                    const workbook = XLSX.read(data, { type: 'binary' });
+                    const sheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                    customers = jsonData.map((row, index) => ({
+                        id: Date.now() + index,
+                        name: row['ชื่อลูกค้า'] || '',
+                        phone: row['เบอร์โทร'] || '',
+                        address: row['ที่อยู่'] || '',
+                        workDetails: row['รายละเอียดงาน'] || '',
+                        startDate: row['วันรับงาน'] || '',
+                        dueDate: row['วันส่งงาน'] || '',
+                        totalPrice: row['ราคารวม'] || '',
+                        deposit: row['มัดจำ'] || '',
+                        paid: row['จ่ายแล้ว'] || '',
+                        status: row['สถานะ'] || 'กำลังทำ',
+                        workImages: [],
+                        chatImages: []
+                    }));
+
+                    alert(`นำเข้าข้อมูลสำเร็จ ${customers.length} รายการ`);
+                    render();
+                } catch (error) {
+                    alert('เกิดข้อผิดพลาดในการนำเข้าไฟล์ Excel');
+                    console.error(error);
+                }
+            };
+            reader.readAsBinaryString(file);
+            e.target.value = '';
+        }
+
+        function handleExportExcel() {
+            if (customers.length === 0) {
+                alert('ไม่มีข้อมูลสำหรับส่งออก');
+                return;
+            }
+
+            const exportData = customers.map(c => ({
+                'ชื่อลูกค้า': c.name,
+                'เบอร์โทร': c.phone,
+                'ที่อยู่': c.address,
+                'รายละเอียดงาน': c.workDetails,
+                'วันรับงาน': c.startDate,
+                'วันส่งงาน': c.dueDate,
+                'ราคารวม': c.totalPrice,
+                'มัดจำ': c.deposit,
+                'จ่ายแล้ว': c.paid,
+                'คงเหลือ': calculateRemaining(c.totalPrice, c.paid),
+                'สถานะ': c.status,
+                'จำนวนรูปงาน': c.workImages.length,
+                'จำนวนรูปแชท': c.chatImages.length
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'ลูกค้า');
+            
+            const date = new Date().toLocaleDateString('th-TH');
+            XLSX.writeFile(wb, `ข้อมูลลูกค้างานปัก_${date}.xlsx`);
+        }
+
+        function render() {
+            const filteredCustomers = customers.filter(c =>
+                c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                c.phone.includes(searchTerm) ||
+                c.workDetails.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <!-- Header -->
+                <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+                    <h1 class="text-3xl font-bold text-purple-800 mb-4">📌 ระบบจัดการลูกค้างานปักผ้า</h1>
+                    
+                    <div class="flex flex-wrap gap-3">
+                        <label class="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                            </svg>
+                            <span>นำเข้า Excel</span>
+                            <input type="file" accept=".xlsx,.xls" onchange="handleImportExcel(event)" class="hidden" />
+                        </label>
+                        
+                        <button onclick="handleExportExcel()" class="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                            </svg>
+                            <span>ส่งออก Excel</span>
+                        </button>
+                        
+                        <button onclick="showForm = true; render();" class="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                            </svg>
+                            <span>เพิ่มลูกค้าใหม่</span>
+                        </button>
+                    </div>
+
+                    <div class="mt-4 relative">
+                        <svg class="absolute left-3 top-3 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <input
+                            type="text"
+                            placeholder="ค้นหาชื่อ, เบอร์โทร, หรือรายละเอียดงาน..."
+                            value="${searchTerm}"
+                            oninput="searchTerm = this.value; render();"
+                            class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        />
+                    </div>
+                </div>
+
+                ${showForm ? renderForm() : ''}
+
+                <!-- Customer List -->
+                <div class="space-y-4">
+                    ${filteredCustomers.length === 0 ? `
+                        <div class="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+                            ${customers.length === 0 ? `
+                                <p class="text-lg mb-2">ยังไม่มีข้อมูลลูกค้า</p>
+                                <p class="text-sm">กดปุ่ม "นำเข้า Excel" เพื่อโหลดข้อมูลเก่า หรือ "เพิ่มลูกค้าใหม่" เพื่อเริ่มต้น</p>
+                            ` : '<p>ไม่พบข้อมูลที่ค้นหา</p>'}
+                        </div>
+                    ` : filteredCustomers.map(c => renderCustomerCard(c)).join('')}
+                </div>
+
+                ${customers.length > 0 ? renderSummary() : ''}
+            `;
+        }
+
+        function renderForm() {
+            return `
+                <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+                    <div class="bg-white rounded-lg shadow-xl w-full max-w-3xl my-8">
+                        <div class="p-6">
+                            <div class="flex justify-between items-center mb-4">
+                                <h2 class="text-2xl font-bold text-purple-800">
+                                    ${editingId ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้าใหม่'}
+                                </h2>
+                                <button onclick="resetForm()" class="text-gray-500 hover:text-gray-700">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div class="space-y-4">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">ชื่อลูกค้า *</label>
+                                        <input type="text" value="${formData.name}" oninput="formData.name = this.value" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">เบอร์โทร</label>
+                                        <input type="tel" value="${formData.phone}" oninput="formData.phone = this.value" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">ที่อยู่</label>
+                                    <textarea rows="2" oninput="formData.address = this.value" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">${formData.address}</textarea>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">รายละเอียดงาน</label>
+                                    <textarea rows="3" oninput="formData.workDetails = this.value" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">${formData.workDetails}</textarea>
+                                </div>
+
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">วันรับงาน</label>
+                                        <input type="date" value="${formData.startDate}" oninput="formData.startDate = this.value" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">วันส่งงาน</label>
+                                        <input type="date" value="${formData.dueDate}" oninput="formData.dueDate = this.value" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
+                                    </div>
+                                </div>
+
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">ราคารวม (บาท)</label>
+                                        <input type="number" value="${formData.totalPrice}" oninput="formData.totalPrice = this.value; render();" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">มัดจำ (บาท)</label>
+                                        <input type="number" value="${formData.deposit}" oninput="formData.deposit = this.value" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">จ่ายแล้ว (บาท)</label>
+                                        <input type="number" value="${formData.paid}" oninput="formData.paid = this.value; render();" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
+                                    </div>
+                                </div>
+
+                                ${formData.totalPrice ? `
+                                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                                        <p class="text-sm font-medium text-yellow-800">
+                                            💰 ยอดคงเหลือ: ${calculateRemaining(formData.totalPrice, formData.paid).toLocaleString()} บาท
+                                        </p>
+                                    </div>
+                                ` : ''}
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">สถานะงาน</label>
+                                    <select onchange="formData.status = this.value" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">
+                                        <option value="กำลังทำ" ${formData.status === 'กำลังทำ' ? 'selected' : ''}>กำลังทำ</option>
+                                        <option value="เสร็จแล้ว" ${formData.status === 'เสร็จแล้ว' ? 'selected' : ''}>เสร็จแล้ว</option>
+                                        <option value="ส่งแล้ว" ${formData.status === 'ส่งแล้ว' ? 'selected' : ''}>ส่งแล้ว</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">รูปงานปัก</label>
+                                    <label class="flex items-center justify-center gap-2 px-4 py-3 bg-purple-50 border-2 border-dashed border-purple-300 rounded-lg cursor-pointer hover:bg-purple-100 transition">
+                                        <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                        </svg>
+                                        <span class="text-purple-600">เพิ่มรูปงาน</span>
+                                        <input type="file" accept="image/*" multiple onchange="handleImageUpload(event, 'workImages')" class="hidden" />
+                                    </label>
+                                    ${formData.workImages.length > 0 ? `
+                                        <div class="mt-2 grid grid-cols-4 gap-2">
+                                            ${formData.workImages.map((img, idx) => `
+                                                <div class="relative group">
+                                                    <img src="${img}" alt="งานปัก" class="w-full h-20 object-cover rounded" />
+                                                    <button type="button" onclick="removeImage('workImages', ${idx})" class="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition">
+                                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">หลักฐานการคุยงาน</label>
+                                    <label class="flex items-center justify-center gap-2 px-4 py-3 bg-blue-50 border-2 border-dashed border-blue-300 rounded-lg cursor-pointer hover:bg-blue-100 transition">
+                                        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                        </svg>
+                                        <span class="text-blue-600">เพิ่มรูปแชท</span>
+                                        <input type="file" accept="image/*" multiple onchange="handleImageUpload(event, 'chatImages')" class="hidden" />
+                                    </label>
+                                    ${formData.chatImages.length > 0 ? `
+                                        <div class="mt-2 grid grid-cols-4 gap-2">
+                                            ${formData.chatImages.map((img, idx) => `
+                                                <div class="relative group">
+                                                    <img src="${img}" alt="แชท" class="w-full h-20 object-cover rounded" />
+                                                    <button type="button" onclick="removeImage('chatImages', ${idx})" class="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition">
+                                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+
+                                <div class="flex gap-3 pt-4">
+                                    <button onclick="handleSubmit(event)" class="flex-1 bg-purple-500 text-white py-2 rounded-lg hover:bg-purple-600 transition font-medium">
+                                        ${editingId ? 'บันทึกการแก้ไข' : 'เพิ่มลูกค้า'}
+                                    </button>
+                                    <button onclick="resetForm()" class="px-6 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 transition font-medium">
+                                        ยกเลิก
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderCustomerCard(customer) {
+            const statusColor = customer.status === 'เสร็จแล้ว' ? 'bg-green-100 text-green-800' :
+                               customer.status === 'ส่งแล้ว' ? 'bg-blue-100 text-blue-800' :
+                               'bg-yellow-100 text-yellow-800';
+
+            return `
+                <div class="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h3 class="text-xl font-bold text-purple-800">${customer.name}</h3>
+                            <p class="text-gray-600">${customer.phone}</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <span class="px-3 py-1 rounded-full text-sm font-medium ${statusColor}">${customer.status}</span>
+                            <button onclick='handleEdit(${JSON.stringify(customer).replace(/'/g, "\\'")}); event.stopPropagation();' class="p-2 text-blue-600 hover:bg-blue-50 rounded transition">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                                </svg>
+                            </button>
+                            <button onclick="handleDelete(${customer.id})" class="p-2 text-red-600 hover:bg-red-50 rounded transition">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <p class="text-sm text-gray-600">ที่อยู่</p>
+                            <p class="font-medium">${customer.address || '-'}</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">รายละเอียดงาน</p>
+                            <p class="font-medium">${customer.workDetails || '-'}</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">วันรับงาน</p>
+                            <p class="font-medium">${customer.startDate || '-'}</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">วันส่งงาน</p>
+                            <p class="font-medium">${customer.dueDate || '-'}</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 bg-purple-50 p-4 rounded-lg">
+                        <div>
+                            <p class="text-sm text-gray-600">ราคารวม</p>
+                            <p class="font-bold text-purple-800">${(parseFloat(customer.totalPrice) || 0).toLocaleString()} ฿</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">มัดจำ</p>
+                            <p class="font-bold text-blue-800">${(parseFloat(customer.deposit) || 0).toLocaleString()} ฿</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">จ่ายแล้ว</p>
+                            <p class="font-bold text-green-800">${(parseFloat(customer.paid) || 0).toLocaleString()} ฿</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">คงเหลือ</p>
+                            <p class="font-bold text-red-800">${calculateRemaining(customer.totalPrice, customer.paid).toLocaleString()} ฿</p>
+                        </div>
+                    </div>
+
+                    ${(customer.workImages.length > 0 || customer.chatImages.length > 0) ? `
+                        <div class="space-y-3">
+                            ${customer.workImages.length > 0 ? `
+                                <div>
+                                    <p class="text-sm font-medium text-gray-700 mb-2">รูปงานปัก (${customer.workImages.length})</p>
+                                    <div class="flex gap-2 overflow-x-auto">
+                                        ${customer.workImages.map(img => `
+                                            <img src="${img}" alt="งานปัก" class="h-24 w-24 object-cover rounded cursor-pointer hover:scale-105 transition" onclick="window.open('${img}')" />
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                            ${customer.chatImages.length > 0 ? `
+                                <div>
+                                    <p class="text-sm font-medium text-gray-700 mb-2">หลักฐานแชท (${customer.chatImages.length})</p>
+                                    <div class="flex gap-2 overflow-x-auto">
+                                        ${customer.chatImages.map(img => `
+                                            <img src="${img}" alt="แชท" class="h-24 w-24 object-cover rounded cursor-pointer hover:scale-105 transition" onclick="window.open('${img}')" />
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        function renderSummary() {
+            const totalRevenue = customers.reduce((sum, c) => sum + (parseFloat(c.totalPrice) || 0), 0);
+            const totalPaid = customers.reduce((sum, c) => sum + (parseFloat(c.paid) || 0), 0);
+            const totalRemaining = customers.reduce((sum, c) => sum + calculateRemaining(c.totalPrice, c.paid), 0);
+
+            return `
+                <div class="mt-6 bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-lg font-bold text-purple-800 mb-3">สรุปยอดรวม</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div class="bg-purple-50 p-4 rounded-lg">
+                            <p class="text-sm text-gray-600">จำนวนลูกค้า</p>
+                            <p class="text-2xl font-bold text-purple-800">${customers.length}</p>
+                        </div>
+                        <div class="bg-blue-50 p-4 rounded-lg">
+                            <p class="text-sm text-gray-600">รายได้รวม</p>
+                            <p class="text-2xl font-bold text-blue-800">${totalRevenue.toLocaleString()} ฿</p>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded-lg">
+                            <p class="text-sm text-gray-600">ได้รับแล้ว</p>
+                            <p class="text-2xl font-bold text-green-800">${totalPaid.toLocaleString()} ฿</p>
+                        </div>
+                        <div class="bg-red-50 p-4 rounded-lg">
+                            <p class="text-sm text-gray-600">ยังไม่ได้รับ</p>
+                            <p class="text-2xl font-bold text-red-800">${totalRemaining.toLocaleString()} ฿</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Initial render
+        render();
+    </script>
+</body>
+</html>
